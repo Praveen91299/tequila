@@ -6,7 +6,9 @@ from tequila.optimizers.optimizer_gd import minimize as minimize_gd
 from tequila.simulators.simulator_api import simulate
 from dataclasses import dataclass
 
-import typing, numbers, numpy
+import typing
+import numbers
+import numpy
 
 
 @dataclass
@@ -16,38 +18,24 @@ class _Optimizers:
     methods: list = None
 
 
-SUPPORTED_OPTIMIZERS = ['scipy', 'phoenics', 'gpyopt', 'gd']
+SUPPORTED_OPTIMIZERS = ["scipy", "gpyopt", "gd"]
 INSTALLED_OPTIMIZERS = {}
-INSTALLED_OPTIMIZERS['scipy'] = _Optimizers(cls=OptimizerSciPy,
-                                            minimize=minimize_scipy,
-                                            methods=OptimizerSciPy.available_methods())
-INSTALLED_OPTIMIZERS['gd'] = _Optimizers(cls=OptimizerGD,
-                                         minimize=minimize_gd,
-                                         methods=OptimizerGD.available_methods())
+INSTALLED_OPTIMIZERS["scipy"] = _Optimizers(
+    cls=OptimizerSciPy, minimize=minimize_scipy, methods=OptimizerSciPy.available_methods()
+)
+INSTALLED_OPTIMIZERS["gd"] = _Optimizers(cls=OptimizerGD, minimize=minimize_gd, methods=OptimizerGD.available_methods())
 
 has_gpyopt = False
 try:
     from tequila.optimizers.optimizer_gpyopt import OptimizerGPyOpt
     from tequila.optimizers.optimizer_gpyopt import minimize as minimize_gpyopt
 
-    INSTALLED_OPTIMIZERS['gpyopt'] = _Optimizers(cls=OptimizerGPyOpt,
-                                                 minimize=minimize_gpyopt,
-                                                 methods=OptimizerGPyOpt.available_methods())
+    INSTALLED_OPTIMIZERS["gpyopt"] = _Optimizers(
+        cls=OptimizerGPyOpt, minimize=minimize_gpyopt, methods=OptimizerGPyOpt.available_methods()
+    )
     has_gpyopt = True
 except ImportError:
     has_gpyopt = False
-
-has_phoenics = False
-try:
-    from tequila.optimizers.optimizer_phoenics import OptimizerPhoenics
-    from tequila.optimizers.optimizer_phoenics import minimize as minimize_phoenics
-
-    INSTALLED_OPTIMIZERS['phoenics'] = _Optimizers(cls=OptimizerPhoenics,
-                                                   minimize=minimize_phoenics,
-                                                   methods=OptimizerPhoenics.available_methods())
-    has_phoenics = True
-except ImportError:
-    has_phoenics = False
 
 
 def show_available_optimizers(module=None):
@@ -78,13 +66,15 @@ def show_available_optimizers(module=None):
         print("Installed optimizer modules: ", list(INSTALLED_OPTIMIZERS.keys()))
 
 
-def minimize(objective,
-             method: str = "bfgs",
-             variables: list = None,
-             initial_values: typing.Union[dict, numbers.Number, typing.Callable] = 0.0,
-             maxiter: int = None,
-             *args,
-             **kwargs):
+def minimize(
+    objective,
+    method: str = "bfgs",
+    variables: list = None,
+    initial_values: typing.Union[dict, numbers.Number, typing.Callable] = 0.0,
+    maxiter: int = None,
+    *args,
+    **kwargs,
+):
     """
 
     Parameters
@@ -128,10 +118,12 @@ def minimize(objective,
 
     """
 
-    ovtmp=objective.extract_variables()
-    fast_return=False
+    ovtmp = objective.extract_variables()
+    fast_return = False
     if ovtmp is None or len(ovtmp) == 0:
-        return OptimizerResults(energy=float(simulate(objective, *args, **kwargs)), variables={}, history=OptimizerHistory())
+        return OptimizerResults(
+            energy=float(simulate(objective, *args, **kwargs)), variables={}, history=OptimizerHistory()
+        )
 
     for k, v in INSTALLED_OPTIMIZERS.items():
         if method.lower() in v.methods or method.upper() in v.methods:
@@ -141,7 +133,10 @@ def minimize(objective,
                 variables=variables,
                 initial_values=initial_values,
                 maxiter=maxiter,
-                *args, **kwargs)
+                *args,
+                **kwargs,
+            )
 
     raise TequilaOptimizerException(
-        "Could not find optimization method {} in tequila optimizers. You might miss dependencies")
+        "Could not find optimization method {} in tequila optimizers. You might miss dependencies"
+    )

@@ -2,46 +2,64 @@
 Collections of Fermion-to-Qubit encodings known to tequila
 Most are Interfaces to OpenFermion
 """
+
+import abc
+
+from tequila import TequilaException
 from tequila.circuit.circuit import QCircuit
-from tequila.circuit.gates import X
+from tequila.circuit.gates import X, CNOT
 from tequila.hamiltonian.qubit_hamiltonian import QubitHamiltonian
 import openfermion
+import numpy
+
 
 def known_encodings():
     # convenience for testing and I/O
-    encodings= {
-        "JordanWigner":JordanWigner,
-        "BravyiKitaev":BravyiKitaev,
+    encodings = {
+        "JordanWigner": JordanWigner,
+        "BravyiKitaev": BravyiKitaev,
         "BravyiKitaevFast": BravyiKitaevFast,
         "BravyiKitaevTree": BravyiKitaevTree,
-        "TaperedBravyiKitaev": TaperedBravyKitaev
+        "TaperedBravyiKitaev": TaperedBravyKitaev,
+        "TaperedBinary": TaperedBinary,
     }
     # aliases
-    encodings = {**encodings,
-                 "ReorderedJordanWigner": lambda **kwargs: JordanWigner(up_then_down=True, **kwargs),
-                 "ReorderedBravyiKitaev": lambda **kwargs: BravyiKitaev(up_then_down=True, **kwargs),
-                 "ReorderedBravyiKitaevTree": lambda **kwargs: BravyiKitaevTree(up_then_down=True, **kwargs),
-                 }
-    return {k.replace("_","").replace("-","").upper():v for k,v in encodings.items()}
+    encodings = {
+        **encodings,
+        "ReorderedJordanWigner": lambda **kwargs: JordanWigner(up_then_down=True, **kwargs),
+        "ReorderedBravyiKitaev": lambda **kwargs: BravyiKitaev(up_then_down=True, **kwargs),
+        "ReorderedBravyiKitaevTree": lambda **kwargs: BravyiKitaevTree(up_then_down=True, **kwargs),
+        "ReorderedTaperedBinary": lambda **kwargs: TaperedBinary(up_then_down=True, **kwargs),
+    }
+    return {k.replace("_", "").replace("-", "").upper(): v for k, v in encodings.items()}
 
-class EncodingBase:
+
+class EncodingBase(metaclass=abc.ABCMeta):
+    # true if the encoding is fully integrated
+    # false: can only do special things (like building the Hamiltionian)
+    # but is not consistent with UCC gate generation
+    _ucc_support = False
+
+    @property
+    def supports_ucc(self):
+        return self._ucc_support
 
     @property
     def name(self):
-        prefix=""
+        prefix = ""
         if self.up_then_down:
-            prefix="Reordered"
+            prefix = "Reordered"
         if hasattr(self, "_name"):
-            return prefix+self._name
+            return prefix + self._name
         else:
-            return prefix+type(self).__name__
+            return prefix + type(self).__name__
 
     def __init__(self, n_electrons, n_orbitals, up_then_down=False, *args, **kwargs):
         self.n_electrons = n_electrons
         self.n_orbitals = n_orbitals
         self.up_then_down = up_then_down
 
-    def __call__(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> QubitHamiltonian:
+    def __call__(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> QubitHamiltonian:
         """
         :param fermion_operator:
             an openfermion FermionOperator
@@ -49,7 +67,9 @@ class EncodingBase:
             The openfermion QubitOperator of this class ecoding
         """
         if self.up_then_down:
-            op = openfermion.reorder(operator=fermion_operator, order_function=openfermion.up_then_down, num_modes=2*self.n_orbitals)
+            op = openfermion.reorder(
+                operator=fermion_operator, order_function=openfermion.up_then_down, num_modes=2 * self.n_orbitals
+            )
         else:
             op = fermion_operator
 
@@ -64,18 +84,18 @@ class EncodingBase:
         if self.up_then_down:
             return i
         else:
-            return 2*i
+            return 2 * i
 
     def down(self, i):
         if self.up_then_down:
-            return i+self.n_orbitals
+            return i + self.n_orbitals
         else:
-            return 2*i+1
+            return 2 * i + 1
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
         raise Exception("{}::do_transform: called base class".format(type(self).__name__))
 
-    def map_state(self, state:list, *args, **kwargs) -> list:
+    def map_state(self, state: list, *args, **kwargs) -> list:
         """
         Expects a state in spin-orbital ordering
         Returns the corresponding qubit state in the class encoding
@@ -103,7 +123,7 @@ class EncodingBase:
         # default is a lazy workaround, but it workds
         n_qubits = 2 * self.n_orbitals
 
-        spin_orbitals = sorted([i for i,x in enumerate(state) if int(x)==1])
+        spin_orbitals = sorted([i for i, x in enumerate(state) if int(x) == 1])
 
         string = "1.0 ["
         for i in spin_orbitals:
@@ -113,31 +133,90 @@ class EncodingBase:
         fop = openfermion.FermionOperator(string, 1.0)
         op = self(fop)
         from tequila.wavefunction.qubit_wavefunction import QubitWaveFunction
-        wfn = QubitWaveFunction.from_int(0, n_qubits=n_qubits)
+
+        wfn = QubitWaveFunction.from_basis_state(n_qubits, 0)
         wfn = wfn.apply_qubitoperator(operator=op)
-        assert (len(wfn.keys()) == 1)
+        assert wfn.length() == 1
         key = list(wfn.keys())[0].array
         return key
 
-    def hcb_to_me(self, *args, **kwargs):
-        return None
+    @abc.abstractmethod
+    def me_to_jw(self) -> QCircuit:
+        """
+        This method needs to be implemented to enable default conversions via Jordan-Wigner
+        """
+        pass
+
+    # independent conversion methods, these are used for default conversions
+    # arXiv:1808.10402 IV. B. 2, Eq. 57
+    # original: https://doi.org/10.1063/1.4768229
+    def _jw_to_bk(self) -> QCircuit:
+        U = QCircuit()  # Constructs empty circuit
+
+        flipper = False
+        for i in range(self.n_orbitals * 2):
+            # even qubits only hold their own value
+            if i % 2 == 0:
+                continue
+
+            # sum always includes the last qubit
+            U += CNOT(control=i - 1, target=i)
+
+            # every second odd qubit ties together with the last odd qubit
+            if flipper:
+                U += CNOT(control=i - 2, target=i)
+
+            flipper = not flipper
+
+            # we have now created the 4x4 blocks on the diagonal of this operators matrix
+
+            # every power of 2 connects to the last power of 2
+            # this corresponds to the last row in the recursive definitions being all 1s
+            x = numpy.log2(i + 1)
+            if x.is_integer() and x >= 3:
+                x = int(x)
+                U += CNOT(control=2 ** (x - 1) - 1, target=i)
+
+        return U
+
+    def _hcb_to_jw(self):
+        U = QCircuit()
+        for i in range(self.n_orbitals):
+            U += X(target=self.down(i), control=self.up(i))
+        return U
+
+    # Convenience Methods
+    def jw_to_me(self) -> QCircuit:
+        return self.me_to_jw().dagger()
+
+    def me_to_bk(self) -> QCircuit:
+        return self.me_to_jw() + self._jw_to_bk()
+
+    def bk_to_me(self) -> QCircuit:
+        return self.me_to_bk().dagger()
+
+    def hcb_to_me(self) -> QCircuit:
+        return self._hcb_to_jw() + self.jw_to_me()
 
     def __str__(self):
         return type(self).__name__
+
 
 class JordanWigner(EncodingBase):
     """
     OpenFermion::jordan_wigner
     """
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+    _ucc_support = True
+
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
         return openfermion.jordan_wigner(fermion_operator, *args, **kwargs)
 
-    def map_state(self, state:list, *args, **kwargs):
-        state = state + [0]*(self.n_orbitals-len(state))
-        result = [0]*len(state)
+    def map_state(self, state: list, *args, **kwargs):
+        state = state + [0] * (self.n_orbitals - len(state))
+        result = [0] * len(state)
         if self.up_then_down:
-            return [state[2*i] for i in range(self.n_orbitals)] + [state[2*i+1] for i in range(self.n_orbitals)]
+            return [state[2 * i] for i in range(self.n_orbitals)] + [state[2 * i + 1] for i in range(self.n_orbitals)]
         else:
             return state
 
@@ -147,13 +226,34 @@ class JordanWigner(EncodingBase):
             U += X(target=self.down(i), control=self.up(i))
         return U
 
+    def me_to_jw(self) -> QCircuit:
+        return QCircuit()
+
+    def jw_to_me(self) -> QCircuit:
+        return QCircuit()
+
+
 class BravyiKitaev(EncodingBase):
     """
     Uses OpenFermion::bravyi_kitaev
     """
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
-        return openfermion.bravyi_kitaev(fermion_operator, n_qubits=self.n_orbitals*2)
+    _ucc_support = True
+
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+        return openfermion.bravyi_kitaev(fermion_operator, n_qubits=self.n_orbitals * 2)
+
+    def me_to_jw(self) -> QCircuit:
+        return self._jw_to_bk().dagger()
+
+    def jw_to_me(self) -> QCircuit:
+        return self._jw_to_bk()
+
+    def bk_to_me(self) -> QCircuit:
+        return QCircuit()
+
+    def me_to_bk(self) -> QCircuit:
+        return QCircuit()
 
 
 class BravyiKitaevTree(EncodingBase):
@@ -161,28 +261,47 @@ class BravyiKitaevTree(EncodingBase):
     Uses OpenFermion::bravyi_kitaev_tree
     """
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
-        return openfermion.bravyi_kitaev_tree(fermion_operator, n_qubits=self.n_orbitals*2)
+    _ucc_support = True
+
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+        return openfermion.bravyi_kitaev_tree(fermion_operator, n_qubits=self.n_orbitals * 2)
+
+    def me_to_jw(self) -> QCircuit:
+        raise TequilaException("{}::me_to_jw: unimplemented".format(type(self).__name__))
+
 
 class BravyiKitaevFast(EncodingBase):
     """
     Uses OpenFermion::bravyi_kitaev_tree
     """
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+    _ucc_support = False
+
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
         n_qubits = openfermion.count_qubits(fermion_operator)
-        if n_qubits != self.n_orbitals*2:
-            raise Exception("BravyiKitaevFast transformation currently only possible for full Hamiltonians (no UCC generators).\nfermion_operator was {}".format(fermion_operator))
+        if n_qubits != self.n_orbitals * 2:
+            raise Exception(
+                "BravyiKitaevFast transformation currently only possible for full Hamiltonians (no UCC generators).\nfermion_operator was {}".format(
+                    fermion_operator
+                )
+            )
         op = openfermion.get_interaction_operator(fermion_operator)
         return openfermion.bravyi_kitaev_fast(op)
 
+    def me_to_jw(self) -> QCircuit:
+        raise TequilaException("{}::me_to_jw: unimplemented".format(type(self).__name__))
+
+
 class TaperedBravyKitaev(EncodingBase):
+    _ucc_support = False
+
     """
     Uses OpenFermion::symmetry_conserving_bravyi_kitaev (tapered bravyi_kitaev_tree arxiv:1701.07072)
     Reduces Hamiltonian by 2 qubits
     See OpenFermion Documentation for more
     Does not work for UCC generators yet
     """
+
     def __init__(self, n_electrons, n_orbitals, active_fermions=None, active_orbitals=None, *args, **kwargs):
         if active_fermions is None:
             self.active_fermions = n_electrons
@@ -190,7 +309,7 @@ class TaperedBravyKitaev(EncodingBase):
             self.active_fermions = active_fermions
 
         if active_orbitals is None:
-            self.active_orbitals = n_orbitals*2 # in openfermion those are spin-orbitals
+            self.active_orbitals = n_orbitals * 2  # in openfermion those are spin-orbitals
         else:
             self.active_orbitals = active_orbitals
 
@@ -198,17 +317,119 @@ class TaperedBravyKitaev(EncodingBase):
             raise Exception("Don't pass up_then_down argument to {}, it can't be changed".format(type(self).__name__))
         super().__init__(n_orbitals=n_orbitals, n_electrons=n_electrons, up_then_down=False, *args, **kwargs)
 
-    def do_transform(self, fermion_operator:openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
-        if openfermion.count_qubits(fermion_operator) != self.n_orbitals*2:
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+        if openfermion.count_qubits(fermion_operator) != self.n_orbitals * 2:
             raise Exception("TaperedBravyiKitaev not ready for UCC generators yet")
-        return openfermion.symmetry_conserving_bravyi_kitaev(fermion_operator, active_orbitals=self.active_orbitals, active_fermions=self.active_fermions)
+        return openfermion.symmetry_conserving_bravyi_kitaev(
+            fermion_operator, active_orbitals=self.active_orbitals, active_fermions=self.active_fermions
+        )
 
-    def map_state(self, state:list, *args, **kwargs):
-        non_tapered_trafo = BravyiKitaevTree(up_then_down=True, n_electrons=self.n_electrons, n_orbitals=self.n_orbitals)
+    def map_state(self, state: list, *args, **kwargs):
+        non_tapered_trafo = BravyiKitaevTree(
+            up_then_down=True, n_electrons=self.n_electrons, n_orbitals=self.n_orbitals
+        )
         key = non_tapered_trafo.map_state(state=state, *args, **kwargs)
-        n_qubits = self.n_orbitals*2
+        n_qubits = self.n_orbitals * 2
         active_qubits = [i for i in range(n_qubits) if i not in [n_qubits - 1, n_qubits // 2 - 1]]
         key = [key[i] for i in active_qubits]
         return key
 
+    def me_to_jw(self) -> QCircuit:
+        raise TequilaException("{}::me_to_jw: unimplemented".format(type(self).__name__))
 
+
+class TaperedBinary(EncodingBase):
+    _ucc_support = True
+
+    """
+    Uses OpenFermion::binary_code_transform (checksum code arxiv:1712.07067)
+    Reduces Hamiltonian by 2 qubits
+    See OpenFermion Documentation for more
+    """
+
+    def __init__(
+        self, n_electrons, n_orbitals, active_fermions=None, active_orbitals=None, up_then_down=False, *args, **kwargs
+    ):
+        if active_fermions is None:
+            self.active_fermions = (
+                n_electrons  # it maybe changed at some point to support different number of alpha and beta electr
+            )
+        else:
+            self.active_fermions = active_fermions
+        if active_orbitals is None:
+            self.active_orbitals = n_orbitals * 2  # in openfermion those are spin-orbitals
+        else:
+            self.active_orbitals = active_orbitals
+        super().__init__(n_orbitals=n_orbitals, n_electrons=n_electrons, up_then_down=up_then_down, *args, **kwargs)
+        self.spin_parity = bool((self.n_electrons / 2) % 2)  # total parity of all \sigma\in\{\alpha\beta\} SOs
+        from scipy.special import factorial
+
+        self.modes = self.active_orbitals  # asumed n alpha = n beta
+
+    def __call__(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> QubitHamiltonian:
+        """
+        :param fermion_operator:
+            an openfermion FermionOperator
+        :return:
+            The openfermion QubitOperator of this class ecoding
+        """
+        fop = self.do_transform(fermion_operator=fermion_operator, *args, **kwargs)
+        fop.compress()
+        return self.post_processing(QubitHamiltonian.from_openfermion(fop))
+
+    def do_transform(self, fermion_operator: openfermion.FermionOperator, *args, **kwargs) -> openfermion.QubitOperator:
+        mul = openfermion.interleaved_code(self.modes) * (
+            2 * openfermion.transforms.checksum_code(self.modes // 2, self.spin_parity)
+        )
+        return openfermion.transforms.binary_code_transform(fermion_operator, mul)
+
+    def post_processing(self, op: QubitHamiltonian, *args, **kwargs):
+        if not self.up_then_down:
+            da = {i: 2 * i for i in range(self.n_orbitals - 1)}
+            db = {i + self.n_orbitals - 1: 2 * i + 1 for i in range(self.n_orbitals - 1)}
+            da.update(db)
+            op = op.map_qubits(da)
+        return op
+
+    def map_state(self, state: list, *args, **kwargs):
+        if len(state) < (2 * self.n_orbitals - 2):
+            state = state + [0] * (2 * self.n_orbitals - len(state) - 2)
+        if self.up_then_down:
+            return [state[2 * i] for i in range(self.n_orbitals - 1)] + [
+                state[2 * i + 1] for i in range(self.n_orbitals - 1)
+            ]
+        else:
+            return state
+
+    def me_to_jw(self) -> QCircuit:
+        """
+        In case of upthendown, expected to be qubit_{n_orbital} free, otherwise please map it properly
+        """
+        U = QCircuit()
+        if self.spin_parity:  # since we now the spin parity
+            U += X(2 * self.n_orbitals - 2) + X(2 * self.n_orbitals - 1)
+        for i in range(
+            self.n_orbitals - 1
+        ):  # we can tapper only one electron per \sigma, we need only to find the difference
+            U += CNOT(2 * i, 2 * self.n_orbitals - 2)
+            U += CNOT(2 * i + 1, 2 * self.n_orbitals - 1)
+        if self.up_then_down:
+            da = {2 * i: i for i in range(self.n_orbitals)}
+            db = {2 * i + 1: self.n_orbitals + i - 1 for i in range(self.n_orbitals)}
+            db.update(da)
+            U = U.map_qubits(db)
+        return U
+
+    def hcb_to_me(self) -> QCircuit:
+        """
+        The HCB term of the tappered orbital is not proyected out but should affect to the ExpValue since it is not
+        on the Hamiltonian
+        """
+        U = QCircuit()
+        for i in range(self.n_orbitals - 1):
+            U += CNOT(
+                control=i + i * (not self.up_then_down),
+                target=i + self.up_then_down * (self.n_orbitals - 1) + (not self.up_then_down) * (i + 1),
+            )
+        U.n_qubits = 2 * self.n_orbitals - 2
+        return U

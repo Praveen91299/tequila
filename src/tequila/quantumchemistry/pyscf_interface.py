@@ -1,11 +1,37 @@
-from tequila import TequilaException, TequilaWarning, ExpectationValue, QCircuit, minimize
-from openfermion import MolecularData
+from tequila import TequilaException, QubitWaveFunction
 from tequila.quantumchemistry.qc_base import QuantumChemistryBase
 from tequila.quantumchemistry import ParametersQC, NBodyTensor
-from dataclasses import dataclass, field
 import pyscf
 
-import numpy, typing, warnings
+from .chemistry_tools import OrbitalData
+
+import numpy
+import typing
+
+
+def _merge_alpha_beta_strs(alpha_str, beta_str, norb):
+    """
+    Merge alpha and beta bitstrings into a single string and compute the resulting phase.
+
+    Args:
+        alpha_str (int): Bitstring representing alpha electrons.
+        beta_str (int): Bitstring representing beta electrons.
+        norb (int): Number of orbitals.
+
+    Returns:
+        tuple:
+            merged_str (int): Interleaved bitstring.
+            phase (int): Phase factor (+1 or -1) from fermionic antisymmetry.
+    """
+    # Interleave the alpha and beta strings
+    alpha_str_b = bin(alpha_str)[2:].zfill(norb)
+    beta_str_b = bin(beta_str)[2:].zfill(norb)
+    merged_str = "".join([alpha_str_b[i] + beta_str_b[i] for i in range(norb)])[::-1]
+
+    # Position of filled orbitals
+    set_bits_beta = [i for i in range(norb) if (beta_str >> i) & 1]
+    phase = (-1) ** sum([(alpha_str & 2**i - 1).bit_count() for i in set_bits_beta])
+    return int(merged_str, 2), phase
 
 
 class OpenVQEEPySCFException(TequilaException):
@@ -13,12 +39,11 @@ class OpenVQEEPySCFException(TequilaException):
 
 
 class QuantumChemistryPySCF(QuantumChemistryBase):
-    def __init__(self, parameters: ParametersQC,
-                 transformation: typing.Union[str, typing.Callable] = None,
-                 *args, **kwargs):
-
+    def __init__(
+        self, parameters: ParametersQC, transformation: typing.Union[str, typing.Callable] = None, *args, **kwargs
+    ):
+        orbitals = None
         if "one_body_integrals" not in kwargs:
-
             geometry = parameters.get_geometry()
             pyscf_geomstring = ""
             for atom in geometry:
@@ -43,18 +68,33 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
             else:
                 mol.symmetry = True
 
-            mol.build()
+            mol.build(parse_arg=False)
 
             # solve restricted HF
             mf = pyscf.scf.RHF(mol)
+            mf.verbose = False
+            if "verbose" in kwargs:
+                mf.verbose = kwargs["verbose"]
+
             mf.kernel()
-            self.irreps = mf.get_irrep_nelec()
+
+            self.irreps = pyscf.symm.label_orb_symm(mol, mol.irrep_name, mol.symm_orb, mf.mo_coeff).tolist()
+
             orbital_energies = mf.mo_energy
+
+            orbitals = [
+                OrbitalData(idx_total=idx, irrep=irr, energy=energy)
+                for idx, (irr, energy) in enumerate(zip(self.irreps, orbital_energies))
+            ]
+
+            for irr in {o.irrep for o in orbitals}:
+                for i, o in enumerate([o for o in orbitals if o.irrep == irr]):
+                    o.idx_irrep = i
 
             # compute mo integrals
             mo_coeff = mf.mo_coeff
-            h_ao = mol.intor('int1e_kin') + mol.intor('int1e_nuc')
-            g_ao = mol.intor('int2e', aosym='s1')
+            h_ao = mol.intor("int1e_kin") + mol.intor("int1e_nuc")
+            g_ao = mol.intor("int2e", aosym="s1")
             S = mol.intor_symmetric("int1e_ovlp")
             g_ao = NBodyTensor(elems=g_ao, ordering="mulliken")
 
@@ -65,30 +105,32 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
             kwargs["two_body_integrals"] = g_ao
             kwargs["one_body_integrals"] = h_ao
             kwargs["orbital_coefficients"] = mo_coeff
+            kwargs["orbital_type"] = "hf"
 
             if "nuclear_repulsion" not in kwargs:
                 kwargs["nuclear_repulsion"] = mol.energy_nuc()
 
-        super().__init__(parameters=parameters, transformation=transformation, *args, **kwargs)
+        super().__init__(parameters=parameters, transformation=transformation, orbitals=orbitals, *args, **kwargs)
 
-    @classmethod
-    def from_tequila(cls, molecule, transformation=None, *args, **kwargs):
-        c, h1, h2 = molecule.get_integrals()
-        if transformation is None:
-            transformation = molecule.transformation
-        return cls(nuclear_repulsion=c,
-                   one_body_integrals=h1,
-                   two_body_integrals=h2,
-                   n_electrons=molecule.n_electrons,
-                   transformation=transformation,
-                   parameters=molecule.parameters, *args, **kwargs)
-
-    def compute_fci(self, *args, **kwargs):
+    def compute_fci(self, get_wfn=False, **kwargs):
         from pyscf import fci
+
         c, h1, h2 = self.get_integrals(ordering="chem")
         norb = self.n_orbitals
         nelec = self.n_electrons
         e, fcivec = fci.direct_spin1.kernel(h1, h2.elems, norb, nelec, **kwargs)
+
+        if get_wfn:
+            alpha_strs = fci.cistring.make_strings(range(norb), nelec // 2)
+            beta_strs = alpha_strs.copy()
+            wfn_dim = 2 ** (2 * norb)
+            wfn = numpy.zeros(wfn_dim)
+            for i, alpha_str in enumerate(alpha_strs):
+                for j, beta_str in enumerate(beta_strs):
+                    merged_str, phase = _merge_alpha_beta_strs(alpha_str, beta_str, norb)
+                    wfn[merged_str] = phase * fcivec[i, j]
+            return e + c, QubitWaveFunction.from_array(wfn)
+
         return e + c
 
     def compute_energy(self, method: str, *args, **kwargs) -> float:
@@ -118,9 +160,9 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
 
         mo_coeff = numpy.eye(norb)
         mo_occ = numpy.zeros(norb)
-        mo_occ[:nelec // 2] = 2
+        mo_occ[: nelec // 2] = 2
 
-        pyscf_mol = pyscf.gto.M(verbose=0)
+        pyscf_mol = pyscf.gto.M(verbose=0, parse_arg=False)
         pyscf_mol.nelectron = nelec
         pyscf_mol.incore_anyway = True  # ensure that custom integrals are used
         pyscf_mol.energy_nuc = lambda *args: c
@@ -140,6 +182,7 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
 
     def _run_ccsd(self, hf=None, **kwargs):
         from pyscf import cc
+
         if hf is None:
             hf = self._get_hf()
         ccsd = cc.RCCSD(hf)
@@ -154,6 +197,7 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
 
     def _run_cisd(self, hf=None, **kwargs):
         from pyscf import ci
+
         if hf is None:
             hf = self._get_hf(**kwargs)
         cisd = ci.RCISD(hf)
@@ -162,6 +206,7 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
 
     def _run_mp2(self, hf=None, **kwargs):
         from pyscf import mp
+
         if hf is None:
             hf = self._get_hf(**kwargs)
         mp2 = mp.MP2(hf)
@@ -172,11 +217,12 @@ class QuantumChemistryPySCF(QuantumChemistryBase):
         base = super().__str__()
         try:
             if hasattr(self, "pyscf_molecule"):
-                base += "{:15} : {} ({})\n".format("point_group", self.pyscf_molecule.groupname,
-                                                   self.pyscf_molecule.topgroup)
+                base += "{:15} : {} ({})\n".format(
+                    "point_group", self.pyscf_molecule.groupname, self.pyscf_molecule.topgroup
+                )
             if hasattr(self, "irreps"):
                 base += "{:15} : {}\n".format("irreps", self.irreps)
-        except:
+        except Exception:
             return base
         return base
 

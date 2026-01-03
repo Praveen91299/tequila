@@ -6,16 +6,20 @@ Tequila is an abstraction framework for (variational) quantum algorithms.
 It operates on abstract data structures allowing the formulation, combination, automatic differentiation and optimization of generalized objectives.
 Tequila can execute the underlying quantum expectation values on state of the art simulators as well as on real quantum devices.  
 
+# Getting Started
+
+Get started with our collection of  
+- *[Tutorials](https://tequilahub.github.io/tequila-tutorials/)*
+- *[Documentation](https://tequilahub.github.io/tequila-tutorials/docs/sphinx/)*  
+
+Further sources:
 - [overview article](https://arxiv.org/abs/2011.03057)   
 - [tequila in a nutshell](https://kottmanj.github.io/tequila-in-a-nutshell/#/)  
-- [getting started](https://jakobkottmann.com/posts/tq-get-started/)    
-- [circuits in tequila](https://jakobkottmann.com/posts/tq-circuits/)  
-- [notebook collection](https://github.com/tequilahub/tequila-tutorials)  
 - [talks and slides](https://kottmanj.github.io/talks_and_material/)  
 
 # Installation
-Recommended Python version is 3.8-3.9.   
-Tequila supports linux, osx and windows. However, not all optional dependencies are supported on windows.
+Recommended Python version is 3.10 (3.11).   
+Tequila supports linux, osx and windows. However, not all optional dependencies (especially chemistry) are supported on windows.  
 
 ## Install from PyPi
 **Do not** install like this: (Minecraft lovers excluded)
@@ -26,7 +30,7 @@ You can install tequila from PyPi as:
 pip install tequila-basic
 ```
 this will install tequila with all essential dependencies.
-We recommend to install some fast quantum backends, like qulacs or qibo, as well.
+We recommend to install some fast quantum backends, like qulacs, as well.
 Those can be installed before or after you install tequila.
 ```bash
 # install basic tequila
@@ -127,7 +131,7 @@ print("VQE : {:+2.8}f".format(result.energy))
 print("FCI : {:+2.8}f".format(fci))
 ```
 
-Do you want to create your own methods? Check out the [tutorials](https://github.com/tequilahub/tequila-tutorials)!
+Do you want to create your own methods? Check out the [tutorials]([https://github.com/tequilahub/tequila-tutorials](https://tequilahub.github.io/tequila-tutorials/))!
 
 # Some Research projects using Tequila
 J.S. Kottmann, A. Anand, A. Aspuru-Guzik.  
@@ -228,15 +232,30 @@ K. Gratsea, C. Sun, P.D. Johnson
 When to Reject a Ground State Preparation Algorithm  
 [arxiv:2212.09492](https://doi.org/10.48550/arXiv.2212.09492)  
 
+R.P. Pothukuchi, L. Lufkin, Y.J. Shen, A. Simon, R. Thorstenson, B.E. Trevisan, M. Tu, M. Yang, B. Foxman, V. S. Pothukuchi, G. Epping, B. J. Jongkees, T.-H. Kyaw, J. R. Busemeyer, J. D Cohen, A. Bhattacharjee  
+Quantum Cognitive Modeling: New Applications and Systems Research Directions  
+[arxiv:2309.00597](https://arxiv.org/abs/2309.00597)  
+
+T.-H. Kyaw, M. B. Soley, B. Allen, P. Bergold, C. Sun, V.S. Batista and A. Aspuru-Guzik  
+Boosting quantum amplitude exponentially in variational quantum algorithms  
+[10.1088/2058-9565/acf4ba](doi.org/10.1088/2058-9565/acf4ba)  
+
+A.G. Cadavid, I. Montalban, A. Dalal, E. Solano, N.N. Hegade  
+Efficient DCQO Algorithm within the Impulse Regime for Portfolio Optimization  
+[arxiv:2308.15475](https://arxiv.org/abs/2308.15475)  
+
+A. Anand, K. Brown  
+Hamiltonians, groups, graphs and ansätze  
+[arxiv:2312.17146](https://arxiv.org/abs/2312.17146)  
+
+P.W.K. Jensen, E.R. Kjellgren, P. Reinholdt, K.M. Ziems, S. Coriani, J. Kongsted, S. Sauer  
+Quantum Equation of Motion with Orbital Optimization for Computing Molecular Properties in Near-Term Quantum Computing  
+[arxiv:2312.12386](https://arxiv.org/abs/2312.12386)  
 
 Let us know, if you want your research project and/or tutorial to be included in this list!
 
 # Dependencies
-Support for additional optimizers or quantum backends can be activated by intalling them in your environment.
-Tequila will then detect them automatically.
-Currently those are: [Phoenics](https://github.com/aspuru-guzik-group/phoenics)
- and [GPyOpt](https://sheffieldml.github.io/GPyOpt/).
-Quantum backends are treated in the same way.
+Support for specific backends (quantum simulators, optimizers, quantum chemistry) can be activated by intalling them in your environment.
 
 ## Quantum Backends
 Currently supported
@@ -256,7 +275,7 @@ Currently supported
 ### [Psi4](https://github.com/psi4/psi4).
 In a conda environment this can be installed with
 ```bash
-conda install psi4 -c psi4
+conda install psi4 -c conda-forge
 ```
 Here is a small [tutorial](https://nbviewer.org/github/tequilahub/tequila-tutorials/blob/main/chemistry/ChemistryModule.ipynb) that illustrates the usage.
 
@@ -277,12 +296,7 @@ pip install pyscf
 Works similar as Psi4. Classical methods are also integrated in the madness interface allowing to use them in a basis-set-free representation.
 
 # Documentation
-You can build the documentation by navigating to `docs` and entering `make html`.
-Open the documentation with a browser over like `firefox docs/build/html/index.html`
-Note that you will need some additional python packages like `sphinx` and `mr2` that are not explicitly listed in the requirements.txt
-
-You can also visit our prebuild online [documentation](https://tequilahub.github.io/tequila/)
-that will correspond to the github master branch
+see [here](https://tequilahub.github.io/tequila-tutorials/docs/sphinx/)  
 
 # How to contribute
 If you find any bugs or inconveniences in `tequila` please don't be shy and let us know.
@@ -294,9 +308,11 @@ Here is how that works:
 1. Make a fork of `tequila` to your own github account.
 2. Checkout the `devel` branch and make sure it is up to date with the main [github repository](https://github.com/aspuru-guzik-group/tequila).
 3. Create and checkout a new branch from `devel` via `git branch pr-my-branch-name` followed by `git checkout pr-my-branch-name`. By typing `git branch` afterwards you can check which branch is currently checked out on your computer.
-4. Introduce changes to the code and commit them with git.
-5. Push the changes to *your* github account
-6. Log into github and create a pull request to the main [github repository](https://github.com/aspuru-guzik-group/tequila). The pull-request should be directed to the `devel` branch (but we can also change that afterwards).
+4. Introduce changes to the code.
+5. Format your code using [Ruff](https://github.com/astral-sh/ruff).
+  You can install Ruff with `pip install ruff`, then run the formatter with `ruff format` and the linter with `ruff check` (most IDEs also provide a way of integrating Ruff and doing this automatically).
+6. Commit them with git and push the changes to *your* github account
+7. Log into github and create a pull request to the main [github repository](https://github.com/aspuru-guzik-group/tequila). The pull-request should be directed to the `devel` branch (but we can also change that afterwards).
 
 If you plan to introduce major changes to the base library it can be beneficial to contact us first.
 This way we might be able to avoid conflicts before they arise.
@@ -324,12 +340,7 @@ You can avoid it by downgrading cirq and openfermion
 ```bash
 pip install --upgrade "openfermion<=1.0.0"
 pip install --upgrade "cirq<=0.9.1"
-```  
-
-
-## Qiskit backend
-Qiskit version 0.25 is not yet supported.
-`pip install --upgrade qiskit<0.25` fixes potential issues. If not: Please let us know.
+```
 
 ## Circuit drawing
 Standard graphical circuit representation within a Jupyter environment is often done using `tq.draw`.
@@ -369,6 +380,3 @@ They can be installed for example over visual studio.
 Tequila runs on Mac OSX.
 You might get in trouble with installing qulacs since it currently does not work with Apple's clang compiler.
 You need to install latest GNU compile (at least gcc-7 and g++7) and set them as default before installing qulacs over pip.
-
-## Qibo and GPyOpt
-Currently you can't use Qibo and GPyOpt within the same environment.
